@@ -611,7 +611,7 @@ class PalletizingEnvironment(gym.Env):
 
         As example, if the task `"O3DBP-k-s"` is loaded, then the length of the list with the selection items is `s`, and the list of the preview items is `k-s`. In general, the preview list is not empty, if and only if `k > s`.
 
-        If less items are left in the item sequence as the values of `k` and `s` would request, instead of the item's properties an empty dictionary is appended.
+        If less items are left in the item sequence as the values of `k` and `s` would request, `None` is appended instead of an item.
 
         Returns.
         --------
@@ -668,21 +668,22 @@ class PalletizingEnvironment(gym.Env):
         """
         This method updates the items that are known in advance, but cannot be selected.
 
+        If fewer items are left in the item sequence than the preview requires, `None` is appended as placeholder,
+        like in `self.__updateItemsSelection`.
+
         Important.
         ----------
         Call this method after `self.__updateItemsSelection`.
         """
+        n_pure_preview_items = self._n_item_preview - self._n_item_selection
         for k in range(self._n_item_selection, self._n_item_preview):
-            item_counter = self._item_sequence_counter + k
-            item_key = str(item_counter)
-            if item_key in self._current_order["order"]["item_sequence"].keys():
-                preview_item = self._current_order["order"]["item_sequence"][item_key]
+            item_index = self._item_sequence_counter + k
+            if item_index < len(self._current_order.item_sequence):
+                preview_item = self._current_order.item_sequence[item_index]
                 if preview_item not in self._items_preview:
                     self._items_preview.append(preview_item)
-            else:
-                n_pure_preview_items = self._n_item_preview - self._n_item_selection
-                if not (len(self._items_preview) >= n_pure_preview_items):
-                    self._items_preview.append({})
+            elif len(self._items_preview) < n_pure_preview_items:
+                self._items_preview.append(None)
 
     def __updatePalletVisualization(self, action: dict) -> None:
         item: Item = action["item"]

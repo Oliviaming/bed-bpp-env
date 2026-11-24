@@ -35,13 +35,13 @@ logger = logging.getLogger(__name__)
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 if __name__ == "__main__":
-    import json
     import subprocess
     from pathlib import Path
 
     from bed_bpp_env.environment.palletizing_environment import PalletizingEnvironment
     from bed_bpp_env.environment.sim_pal_env import SimPalEnv
     from bed_bpp_env.heuristics.o3dbp_3_2 import O3DBP_3_2
+    from bed_bpp_env.io_utils import load_order_sequence
 
     logger.info(f"given arguments: {utils.PARSEDARGUMENTS}")
     logger.info(f"the results are stored in {utils.OUTPUTDIRECTORY}")
@@ -50,15 +50,13 @@ if __name__ == "__main__":
     _, nPreview, nSelection = utils.PARSEDARGUMENTS.get("task").split("-")
     heuristic = O3DBP_3_2(preview=int(nPreview), selection=int(nSelection))
 
-    dirOutputfile = utils.PARSEDARGUMENTS["data"]
-    with open(dirOutputfile) as f:
-        ORDERS_FOR_EPISODES = json.load(f, parse_int=False)
+    order_sequence = load_order_sequence(utils.PARSEDARGUMENTS["data"])
 
     # setup a simulation palletizing environment
     env = PalletizingEnvironment()
-    observation, info = env.reset(data_for_episodes=ORDERS_FOR_EPISODES)
+    observation, info = env.reset(order_sequence=order_sequence)
     simenv = SimPalEnv()
-    _, _ = simenv.reset(data_for_episodes=ORDERS_FOR_EPISODES)
+    _, _ = simenv.reset(order_sequence=order_sequence)
     heuristic.setSimEnv(simenv)
 
     # start simulation

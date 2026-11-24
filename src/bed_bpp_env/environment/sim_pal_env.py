@@ -5,12 +5,14 @@ Similar to `PalletizingEnvironment`, but with little changes for the tasks with 
 import configparser
 import copy
 import logging
-from typing import Tuple
+from typing import Optional
 
 import gymnasium as gym
 import numpy as np
 from gymnasium.spaces import Box, Dict, Discrete
 
+from bed_bpp_env.data_model.item import Item
+from bed_bpp_env.data_model.order import Order
 from bed_bpp_env.environment import MAXHEIGHT_OBSERVATION_SPACE, SIZE_EURO_PALLET, SIZE_ROLLCONTAINER
 from bed_bpp_env.environment.cuboid import Cuboid
 from bed_bpp_env.environment.space_3d import Space3D
@@ -30,6 +32,13 @@ conf.read(USEDCONFIGURATIONFILE)
 class SimPalEnv(gym.Env):
     """
     Similar to `PalletizingEnvironment`, but with little changes for the tasks with preview and selection.
+
+    It has no render methods, so that it can be copied cheaply and pickled (needed for `multiprocessing`). Heuristics
+    use copies of this environment to simulate the outcome of actions before applying an action to the
+    `PalletizingEnvironment`.
+
+    Items are `Item` objects. Missing items at the end of an item sequence are represented by `None` in the lists of
+    the selection and preview items, as in `PalletizingEnvironment`.
     """
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
@@ -37,14 +46,14 @@ class SimPalEnv(gym.Env):
     def __init__(self) -> None:
         self._size = SIZE_EURO_PALLET
         """The palletizing target's size of the base area in x- and y-direction given in millimeters."""
-        self.__N_ORIENTATION = 2
+        self._n_orientations = 2
         """The amount of different orientations that are allowed during palletization."""
 
         self.action_space = Dict(
             {
                 "x": Discrete(self._size[0]),
                 "y": Discrete(self._size[1]),
-                "orientation": Discrete(self.__N_ORIENTATION),
+                "orientation": Discrete(self._n_orientations),
             }
         )
         """The action space consists of the simple action spaces for x-, y-coordinate and the orientation of the item."""
@@ -54,41 +63,42 @@ class SimPalEnv(gym.Env):
         )
         """The observation space describes the heights in each coordinate on the palletizing target."""
 
-        self.__TargetSpace = Space3D(self._size)
+        self._target_space = Space3D(self._size)
         """Represents the 3D space where the palletization takes place."""
 
         self._actions = []
         """A list that stores all actions done in the order of their palletizing point in time."""
 
-        self.__PalletizedVolume = 0.0
+        self._palletized_volume = 0.0
         """A float that stores the palletized volume of all items in cm^3."""
 
-        self.__Orders = {}
-        """The orders that are given whenever the method `reset` is called with a non-empty parameter `data_for_episodes`. The format is identical to the format of the benchmark data."""
-        self.__CurrentOrder = {}
-        """This dictionary has the keys `"key"`, `"order"`, and `"seq"`, whose values store the key of the order as given in the order data, the current order itself, and the number in the sequence of all orders, respectively."""
-        self.__OrderSequence = []  # list of the keys of the given order data
-        """This list contains all keys in the order data in the same order as it is given."""
-        self.__ItemSequenceCounter = None
-        """This integer stores the position within an item sequence of the current order."""
+        self._orders: list[Order] = []
+        """The orders that are given whenever the method `reset` is called with an `order_sequence`."""
+        self._current_order: Optional[Order] = None
+        """The order that is currently palletized."""
+        self._order_sequence: list[str] = []
+        """The ids of the given orders in the same order as they are given."""
+        self._item_sequence_counter = None
+        """This integer stores the position within the item sequence of the current order (starting at `0`)."""
 
-        self.__NItemPreview = int(conf.get("environment", "preview"))
+        self._n_item_preview = int(conf.get("environment", "preview"))
         """The amount of preview items."""
-        self.__NItemSelection = int(conf.get("environment", "selection"))
+        self._n_item_selection = int(conf.get("environment", "selection"))
         """The amount of items to select from, i.e., to select for the next step."""
 
-        self.__ItemsSelection = []
+        self._items_selection: list[Optional[Item]] = []
         """The items to select from for the next palletizing step."""
-        self.__ItemsPreview = []
+        self._items_preview: list[Optional[Item]] = []
         """The preview items."""
 
-        self.__KPIs = KPIs()
+        self._kpis = KPIs()
         """Holds the values of the KPIs for each order."""
 
-        self.__MPScoreEstimation = False
-        """Needed for the update item preview """
+        self._mp_score_estimation = False
+        """Indicates whether this environment is used for estimating scores. In this case, the selection and preview
+        items are set with `setItems` and the preview is not refilled from the current order."""
 
-    def step(self, action: dict) -> Tuple[np.ndarray, float, bool, dict]:
+    def step(self, action: dict) -> tuple[np.ndarray, float, bool, dict]:
         """
         In the step function we have to palletize the given item at the given position. Translated to this implementation that means that we have to
         (a) calculate the z-coordinate of the placement for the given action (x-,y-coordinate and orientation of item),
@@ -101,7 +111,7 @@ class SimPalEnv(gym.Env):
         Parameters.
         -----------
             action: dict
-                The action contains the `"x"` and `"y"` coordinate of the placement, the item and its `"orientation"`.
+                The action contains the `"x"` and `"y"` coordinate of the placement, the `"item"` and its `"orientation"`.
 
         Returns.
         --------
@@ -114,17 +124,17 @@ class SimPalEnv(gym.Env):
                 "x": 100, # int
                 "y": 100, # int
                 "orientation": 0, # int
-                "item": {'article': 'cake-00104295', 'id': 'c00104295', 'product_group': 'confectionery', 'length/mm': 590, 'width/mm': 200, 'height/mm': 210, 'weight/kg': 7.67, 'sequence': 1}
+                "item": Item(article='cake-00104295', id='c00104295', product_group='confectionery', length_mm=590, width_mm=200, height_mm=210, weight_kg=7.67, sequence=1)
             }
         """
         info = {}
 
         # get the variables that are needed here
-        step_vars = self.__getStepVariables(action)
-        item_for_action = action["item"]
+        step_vars = self._get_step_variables(action)
+        item_for_action: Item = action["item"]
 
         # define the item
-        item = Cuboid(step_vars["item"])
+        item = Cuboid(item_for_action)
         item.set_orientation(step_vars["orientation"])
 
         # create a np.ndarray that has the same shape as the target, its elements are 1 if the item is located in this region and 0 otherwise
@@ -146,39 +156,39 @@ class SimPalEnv(gym.Env):
                 cropped_shape, dtype=int
             )
 
-        # obtaiin the FLB height for the item in the selected (x, y)-coordinate
-        maxHeightInTargetArea = int(np.amax(np.multiply(self.__TargetSpace.getHeights(), item_on_target)))
+        # obtain the FLB height for the item in the selected (x, y)-coordinate
+        max_height_in_target_area = int(np.amax(np.multiply(self._target_space.getHeights(), item_on_target)))
 
         # define the action in the needed format
-        actionExt = {
-            "item": step_vars["item"],
-            "flb_coordinates": [step_vars["xCoord"], step_vars["yCoord"], maxHeightInTargetArea],
+        action_extended = {
+            "item": item_for_action,
+            "flb_coordinates": [step_vars["xCoord"], step_vars["yCoord"], max_height_in_target_area],
             "orientation": step_vars["orientation"],
         }
-        self._actions.append(actionExt)
-        info.update({"action_for_vis": actionExt})
-        logger.debug(f"step() -> extended action: {actionExt}")
+        self._actions.append(action_extended)
+        info.update({"action_for_vis": action_extended})
+        logger.debug(f"step() -> extended action: {action_extended}")
 
         # add the item to the palletizing target
-        self.__TargetSpace.addItem(item, actionExt["orientation"], actionExt["flb_coordinates"])
+        self._target_space.addItem(item, action_extended["orientation"], action_extended["flb_coordinates"])
         info.update({"support_area/%": item.percentage_direct_support_surface})
 
         # prepare for next call of step
-        additionalInfo = self.__prepareForNextStep(item_for_action)
-        done = additionalInfo.pop("done")
-        info.update(additionalInfo)
+        additional_info = self.__prepareForNextStep(item_for_action)
+        done = additional_info.pop("done")
+        info.update(additional_info)
 
         # update the attributes
-        self.__PalletizedVolume += (step_vars["deltaX"] * step_vars["deltaY"] * step_vars["itemHeight"]) / 1000.0
-        self.__KPIs.update()
+        self._palletized_volume += (step_vars["deltaX"] * step_vars["deltaY"] * step_vars["itemHeight"]) / 1000.0
+        self._kpis.update()
 
         reward = self.__getReward(done)
-        info = self.__getInfo("step", info)
+        info = self.__getInfo("step", info, done)
 
-        stepReturns = self.__TargetSpace.getHeights(), reward, done, info
-        return stepReturns
+        step_returns = self._target_space.getHeights(), reward, done, info
+        return step_returns
 
-    def reset(self, data_for_episodes: dict = {}) -> Tuple[np.ndarray, dict]:
+    def reset(self, order_sequence: Optional[list[Order]] = None) -> tuple[np.ndarray, dict]:
         """
         This method is responsible for
         (a) the change of the orders, e.g., from "00100001" -> "00100002",
@@ -189,8 +199,9 @@ class SimPalEnv(gym.Env):
 
         Parameters.
         -----------
-        data_for_epsidoes: dict (default = {})
-            The data for the episodes in the format of the benchmark data.
+        order_sequence: Optional[list[Order]] (default = None)
+            The orders that are palletized. If given, the palletization starts with the first order of this sequence.
+            Otherwise, the next order of the previously given sequence is considered.
 
         Returns.
         --------
@@ -202,65 +213,58 @@ class SimPalEnv(gym.Env):
         # # # # # Change the Order that is considered # # # # #
         done = False
         # change the current order
-        if self.__CurrentOrder == {} or not (data_for_episodes == {}):
-            self.__Orders = data_for_episodes
-            self.__OrderSequence = list(self.__Orders.keys())
-            self.__CurrentOrder["seq"] = 0
-            orderKey = self.__OrderSequence[self.__CurrentOrder["seq"]]
-            self.__CurrentOrder["key"] = orderKey
-            self.__CurrentOrder["order"] = self.__Orders[orderKey]
+        if self._current_order is None or order_sequence is not None:
+            self._orders = order_sequence.copy()
+            self._order_sequence = [order.id for order in self._orders]
+            self._current_order = self._orders[0]
 
-            self.__ItemSequenceCounter = 1
-
-        elif self.__CurrentOrder["seq"] + 1 >= len(self.__OrderSequence):
+        elif self._current_order.id == self._order_sequence[-1]:
             # reached the last order in the data
             done = True
-            self.__CurrentOrder["seq"] += 1
-        else:
-            self.__CurrentOrder["seq"] += 1
-            orderKey = self.__OrderSequence[self.__CurrentOrder["seq"]]
-            self.__CurrentOrder["key"] = orderKey
-            self.__CurrentOrder["order"] = self.__Orders[orderKey]
-            self.__ItemSequenceCounter = 1
 
-        if not (done):
-            logger.debug(f"{self.__CurrentOrder}")
+        else:
+            next_order_index = self._order_sequence.index(self._current_order.id) + 1
+            self._current_order = self._orders[next_order_index]
+
+        if not done:
+            logger.debug(f"current order: {self._current_order.id}")
 
         # # # # # Reset the Attributes # # # # #
+        self._item_sequence_counter = 0
         # change the size related to the palletizing target and the action space
-        palletizingTarget = self.__CurrentOrder["order"]["properties"]["target"]
-        if palletizingTarget == "rollcontainer":
+        palletizing_target = self._current_order.properties.target
+        if palletizing_target == "rollcontainer":
             self._size = SIZE_ROLLCONTAINER
-        elif palletizingTarget == "euro-pallet":
+        elif palletizing_target == "euro-pallet":
             self._size = SIZE_EURO_PALLET
         else:
             # size is given as `"x,y,z"`
-            sizes = palletizingTarget.split(",")
-            self._size = tuple([int(sizes[0]), int(sizes[1])])
+            sizes = palletizing_target.split(",")
+            self._size = (int(sizes[0]), int(sizes[1]))
 
         self.action_space = Dict(
             {
                 "x": Discrete(self._size[0]),
                 "y": Discrete(self._size[1]),
-                "orientation": Discrete(self.__N_ORIENTATION),
+                "orientation": Discrete(self._n_orientations),
             }
         )
 
-        self.__TargetSpace.reset(self._size)
+        self._target_space.reset(self._size)
         self._actions = []
-        self.__PalletizedVolume = 0.0
-        self.__KPIs.reset(self.__TargetSpace, self.__CurrentOrder)
+        self._palletized_volume = 0.0
+        self._kpis.reset(self._target_space, self._current_order)
 
-        self.__ItemsSelection = []
-        self.__ItemsPreview = []
-        if not (done):
+        self._items_selection = []
+        self._items_preview = []
+        if not done:
             # only update items if we do not
             self.__updateItemsSelection()
             self.__updateItemsPreview()
 
         # # # # # Obtain the Observation and Info # # # # #
-        observation = self.__TargetSpace.getHeights()
-        info = self.__getInfo("reset")
+        observation = self._target_space.getHeights()
+        info = self.__getInfo("reset", done=done)
 
         return observation, info
 
@@ -280,38 +284,35 @@ class SimPalEnv(gym.Env):
             reward = 0.0
         return reward
 
-    def __getInfo(self, calledby: str = "step", additionalinfo: dict = {}) -> dict:
-        """Get the info dictionary after reset or step"""
-        info = additionalinfo
+    def __getInfo(self, calledby: str = "step", additionalinfo: Optional[dict] = None, done: bool = False) -> dict:
+        """Get the info dictionary after reset or step."""
+        if additionalinfo is None:
+            info = {}
+        else:
+            info = additionalinfo
 
         if calledby == "step":
             info.update(
                 {
                     "all_orders_considered": None,
-                    "item_volume_on_target/cm^3": self.__PalletizedVolume,
-                    "n_items_in_order": len(self.__CurrentOrder["order"]["item_sequence"]),
+                    "item_volume_on_target/cm^3": self._palletized_volume,
+                    "n_items_in_order": len(self._current_order.item_sequence),
                 }
             )
 
         elif calledby == "reset":
-            # obtain whether all orders are considered
-            done = self.__CurrentOrder["seq"] >= len(
-                self.__OrderSequence
-            )  # do not need +1 because the counter is already increased
-
-            if not (done):
-                nextItems = self.__obtainNextItems()
-                item = nextItems["selection"][0]
-
-                cornerPoints = self.__determineCornerPoints(nextItems["selection"])
+            # if done is True, then all orders are considered
+            if not done:
+                next_items = self.__obtainNextItems()
+                corner_points = self.__determineCornerPoints(next_items["selection"])
 
                 info.update(
                     {
                         "all_orders_considered": done,
-                        "order_id": self.__CurrentOrder["key"],
-                        "next_items_selection": nextItems["selection"],
-                        "next_items_preview": nextItems["preview"],
-                        "corner_points": cornerPoints,
+                        "order_id": self._current_order.id,
+                        "next_items_selection": next_items["selection"],
+                        "next_items_preview": next_items["preview"],
+                        "corner_points": corner_points,
                     }
                 )
 
@@ -329,34 +330,35 @@ class SimPalEnv(gym.Env):
 
         return info
 
-    def __getStepVariables(self, action: dict) -> dict:
+    def _get_step_variables(self, action: dict) -> dict:
         """This method creates the variables that are needed in the `step` method, depending on the given action."""
         orientation = action["orientation"]
-        xCoord, yCoord = int(action["x"]), int(action["y"])
+        x_coord, y_coord = int(action["x"]), int(action["y"])
 
-        item = action["item"]
-        itemLength, itemWidth, itemHeight = int(item["length/mm"]), int(item["width/mm"]), int(item["height/mm"])
+        item: Item = action["item"]
+        item_length, item_width, item_height = int(item.length_mm), int(item.width_mm), int(item.height_mm)
 
         if orientation == 0:
-            deltaX, deltaY = itemLength, itemWidth
+            delta_x, delta_y = item_length, item_width
         elif orientation == 1:
-            deltaX, deltaY = itemWidth, itemLength
+            delta_x, delta_y = item_width, item_length
 
-        stepVar = {
-            "xCoord": xCoord,
-            "yCoord": yCoord,
-            "deltaX": deltaX,
-            "deltaY": deltaY,
-            "itemHeight": itemHeight,
+        step_var = {
+            "xCoord": x_coord,
+            "yCoord": y_coord,
+            "deltaX": delta_x,
+            "deltaY": delta_y,
+            "itemHeight": item_height,
             "orientation": orientation,
-            "item": item,
         }
 
-        return stepVar
+        return step_var
 
-    def __prepareForNextStep(self, placeditem: dict) -> dict:
+    def __prepareForNextStep(self, placeditem: Item) -> dict:
         """
-        This method prepares the environment for the next call of the `step` method. Hence, the __ItemSequenceCounter is increased and the next palletizing items and their allowed positions on the target are calculated, unless the current episode has not finished (after the currently called `step`).
+        This method prepares the environment for the next call of the `step` method. Hence, the
+        `_item_sequence_counter` is increased and the next palletizing items and their corner points are calculated,
+        unless the current episode has finished (after the currently called `step`).
 
         Returns.
         --------
@@ -365,24 +367,24 @@ class SimPalEnv(gym.Env):
         """
         info = {}
 
-        self.__ItemSequenceCounter += 1
-        if self.__ItemSequenceCounter > len(self.__CurrentOrder["order"]["item_sequence"]):
+        self._item_sequence_counter += 1
+        if self._item_sequence_counter >= len(self._current_order.item_sequence):
             done = True  # episode finished
             info.update({"next_items_selection": [], "next_items_preview": []})
         else:
             done = False
             self.__updateItemsSelection(placeditem)
             self.__updateItemsPreview()
-            nextItems = self.__obtainNextItems()
+            next_items = self.__obtainNextItems()
 
             # get the corner points for the items that can be selected
-            cornerPoints = self.__determineCornerPoints(nextItems["selection"])
+            corner_points = self.__determineCornerPoints(next_items["selection"])
 
             info.update(
-                {  # "allowed_area": allowedArea,
-                    "next_items_selection": nextItems["selection"],
-                    "next_items_preview": nextItems["preview"],
-                    "corner_points": cornerPoints,
+                {
+                    "next_items_selection": next_items["selection"],
+                    "next_items_preview": next_items["preview"],
+                    "corner_points": corner_points,
                 }
             )
 
@@ -396,136 +398,133 @@ class SimPalEnv(gym.Env):
 
         As example, if the task `"O3DBP-k-s"` is loaded, then the length of the list with the selection items is `s`, and the list of the preview items is `k-s`. In general, the preview list is not empty, if and only if `k > s`.
 
-        If less items are left in the item sequence as the values of `k` and `s` would request, instead of the item's properties an empty dictionary is appended.
+        If less items are left in the item sequence as the values of `k` and `s` would request, `None` is appended instead of an item.
 
         Returns.
         --------
-        nextItems: dict
-            Contains the next items in the item sequence.
-
-        Examples.
-        ---------
-        >>> self.__obtainNextItems() # with k=s=1
-        {
-            "selection": [{"article": "article_1", "id": "id_1", "product_group": "pg_1", "length/mm": 400, "width/mm": 300, "height/mm": 200, "weight/kg": 2, "sequence": 1}],
-            "preview": []
-        }
-        >>> self.__obtainNextItems() # with k=3; s=1
-        {
-            "selection": [{"article": "article_1", "id": "id_1", "product_group": "pg_1", "length/mm": 400, "width/mm": 300, "height/mm": 200, "weight/kg": 2, "sequence": 1}],
-            "preview": [{"article": "article_2", "id": "id_2", "product_group": "pg_2", "length/mm": 400, "width/mm": 300, "height/mm": 200, "weight/kg": 2, "sequence": 2}, {"article": "article_3", "id": "id_3", "product_group": "pg_3", "length/mm": 400, "width/mm": 300, "height/mm": 200, "weight/kg": 2, "sequence": 3}]
-        }
-
+        next_items: dict
+            Contains the next items in the item sequence, i.e., the keys `"selection"` and `"preview"` with lists of
+            `Item` (or `None`) as values.
         """
-        nextItems = {"selection": self.__ItemsSelection, "preview": self.__ItemsPreview}
-        return nextItems
+        next_items = {"selection": self._items_selection, "preview": self._items_preview}
+        return next_items
 
-    def __determineCornerPoints(self, possibleitems: list) -> dict:
+    def __determineCornerPoints(self, possibleitems: list[Optional[Item]]) -> dict:
         """
         Determines the corner points for all items that are given.
 
         Parameters.
         -----------
         possibleitems: list
-            Contains the item dictionary of the items that could be selected for palletization.
+            Contains the items that could be selected for palletization. `None` entries are ignored.
 
         Returns.
         --------
-        cornerPoints: list
-            The corner points for an item that is specified by its dimension.
+        corner_points: dict
+            The corner points for each item article and orientation, e.g., `{article: {0: [...], 1: [...]}}`.
         """
-        cornerPoints = {}
+        corner_points = {}
         for item in possibleitems:
-            itemArticle = item.get("article", None)
-            if not (itemArticle is None):
-                cornerPoints[itemArticle] = {}
-                for orientation in range(self.__N_ORIENTATION):
+            if item is not None:
+                corner_points[item.article] = {}
+                for orientation in range(self._n_orientations):
                     if orientation == 0:
-                        length, width, height = item.get("length/mm"), item.get("width/mm"), item.get("height/mm")
+                        length, width, height = item.length_mm, item.width_mm, item.height_mm
                     elif orientation == 1:
-                        width, length, height = item.get("length/mm"), item.get("width/mm"), item.get("height/mm")
+                        width, length, height = item.length_mm, item.width_mm, item.height_mm
 
-                    cornerPoints[itemArticle][orientation] = self.__TargetSpace.getCornerPointsIn3D(
+                    corner_points[item.article][orientation] = self._target_space.getCornerPointsIn3D(
                         (length, width, height)
                     )
 
-        return cornerPoints
+        return corner_points
 
     def getNPlacedItems(self) -> int:
         """Returns the amount of placed items in the environment."""
         return len(self._actions)
 
-    def __updateItemsSelection(self, itemdict: dict = {}) -> None:
+    def __updateItemsSelection(self, placeditem: Optional[Item] = None) -> None:
         """
         This method updates the items that can be selected.
 
         Parameters.
         -----------
-        itemdict: dict
-            The properties of the item that was palletized in the last `env.step` call.
+        placeditem: Optional[Item]
+            The item that was palletized in the last `env.step` call.
 
         Important.
         ----------
         Call this method before `self.__updateItemsPreview`.
         """
-        if (self.__ItemSequenceCounter == 1) or (len(self.__ItemsPreview) == 0):
-            if not (self.__ItemSequenceCounter == 1):
-                # not first call -> remove itemdict from selection
-                self.__ItemsSelection.remove(itemdict)
+        if (self._item_sequence_counter == 0) or (len(self._items_preview) == 0):
+            if self._item_sequence_counter != 0:
+                # not first call -> remove placed item from selection
+                self._items_selection.remove(placeditem)
             # first call in env.reset in an episode
-            for s in range(self.__NItemSelection):
-                itemKey = str(self.__ItemSequenceCounter + s)
-                if itemKey in self.__CurrentOrder["order"]["item_sequence"].keys():
-                    self.__ItemsSelection.append(
-                        self.__CurrentOrder["order"]["item_sequence"][str(self.__ItemSequenceCounter + s)]
-                    )
+            for s in range(self._n_item_selection):
+                item_index = self._item_sequence_counter + s
+                if item_index < len(self._current_order.item_sequence):
+                    self._items_selection.append(self._current_order.item_sequence[item_index])
                 else:
-                    self.__ItemsSelection.append({})
+                    self._items_selection.append(None)
         else:
             # call in env.step
-            self.__ItemsSelection.remove(itemdict)
-            self.__ItemsSelection.append(self.__ItemsPreview.pop(0))
+            self._items_selection.remove(placeditem)
+            self._items_selection.append(self._items_preview.pop(0))
 
     def __updateItemsPreview(self) -> None:
         """
         This method updates the items that are known in advance, but cannot be selected.
 
-        Different to PalletizingEnvironment.py
+        Different to `PalletizingEnvironment`: when estimating scores (see `setItems`), the preview is only padded with
+        `None`, since the upcoming items are unknown to the heuristic.
 
         Important.
         ----------
         Call this method after `self.__updateItemsSelection`.
         """
-        if self.__MPScoreEstimation:
-            for k in range(self.__NItemSelection, self.__NItemPreview):
-                nPurePrevItems = self.__NItemPreview - self.__NItemSelection
-                if not (len(self.__ItemsPreview) >= nPurePrevItems):
-                    self.__ItemsPreview.append({})
+        n_pure_preview_items = self._n_item_preview - self._n_item_selection
+
+        if self._mp_score_estimation:
+            for _ in range(self._n_item_selection, self._n_item_preview):
+                if len(self._items_preview) < n_pure_preview_items:
+                    self._items_preview.append(None)
 
         else:
-            for k in range(self.__NItemSelection, self.__NItemPreview):
-                itemCounter = self.__ItemSequenceCounter + k
-                itemKey = str(itemCounter)
-                if itemKey in self.__CurrentOrder["order"]["item_sequence"].keys():
-                    prevItem = self.__CurrentOrder["order"]["item_sequence"][itemKey]
-                    if not (prevItem in self.__ItemsPreview):
-                        self.__ItemsPreview.append(prevItem)
-                else:
-                    nPurePrevItems = self.__NItemPreview - self.__NItemSelection
-                    if not (len(self.__ItemsPreview) >= nPurePrevItems):
-                        self.__ItemsPreview.append({})
+            for k in range(self._n_item_selection, self._n_item_preview):
+                item_index = self._item_sequence_counter + k
+                if item_index < len(self._current_order.item_sequence):
+                    preview_item = self._current_order.item_sequence[item_index]
+                    if preview_item not in self._items_preview:
+                        self._items_preview.append(preview_item)
+                elif len(self._items_preview) < n_pure_preview_items:
+                    self._items_preview.append(None)
 
-    def setItems(self, preview: list, selection: list) -> None:
-        """Sets the preview and selection items."""
-        self.__ItemsSelection = copy.deepcopy(selection)
-        self.__ItemsPreview = copy.deepcopy(preview)
+    def setItems(self, preview: list[Optional[Item]], selection: list[Optional[Item]]) -> None:
+        """Sets the preview and selection items and switches to the score estimation mode."""
+        self._items_selection = copy.deepcopy(selection)
+        self._items_preview = copy.deepcopy(preview)
 
-        self.__MPScoreEstimation = True
+        self._mp_score_estimation = True
 
     def remStoredOrder(self) -> None:
         """
-        Deletes the stored benchmark data order.
+        Deletes the stored orders, except the current order.
 
         => Reduce time copy.deepcopy needs
         """
-        del self.__Orders
+        self._orders = []
+
+    def copy_without_orders(self) -> "SimPalEnv":
+        """
+        Returns a deep copy of this environment without the stored orders (the current order is kept).
+
+        This is equivalent to `copy.deepcopy(env)` followed by `remStoredOrder()`, but avoids copying all orders, which
+        is expensive for large order sequences.
+        """
+        stored_orders = self._orders
+        self._orders = []
+        try:
+            return copy.deepcopy(self)
+        finally:
+            self._orders = stored_orders

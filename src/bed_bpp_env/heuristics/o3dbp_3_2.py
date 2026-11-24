@@ -11,6 +11,7 @@ from typing import Tuple
 
 import numpy as np
 
+from bed_bpp_env.data_model.item import Item
 from bed_bpp_env.environment.sim_pal_env import SimPalEnv
 
 logger = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ class O3DBP_3_2:
                 "x": 100,
                 "y": 100,
                 "orientation": 0,
-                "item": {'article': 'cake-00104295', 'id': 'c00104295', 'product_group': 'confectionery', 'length/mm': 590.0, 'width/mm': 200.0, 'height/mm': 210.0, 'weight/kg': 7.67, 'lc_type': 'tbd', 'sequence': 1}
+                "item": Item(article='cake-00104295', id='c00104295', product_group='confectionery', length_mm=590, width_mm=200, height_mm=210, weight_kg=7.67, sequence=1)
             }
         """
         possibleCP = self.__extractCornerPointsFromEnvironmentInfo(info.get("corner_points"))
@@ -115,8 +116,8 @@ class O3DBP_3_2:
                     None,
                     firstCornerPointAction["orientation"],
                 )
-                actionItem = firstCornerPointAction["item"]
-                itemSize = actionItem["length/mm"], actionItem["width/mm"], actionItem["height/mm"]
+                actionItem: Item = firstCornerPointAction["item"]
+                itemSize = actionItem.length_mm, actionItem.width_mm, actionItem.height_mm
 
                 estimatedHeightInCP = self.__estimatePlacementZCoordinate(observation, tempCornerPoint, itemSize)
 
@@ -361,9 +362,11 @@ class O3DBP_3_2:
         # prepare actions depending on items that can be selected
         collectionActionAndScore = []
         for item in info.get("next_items_selection", []):
-            itemArticle = item.get("article")
-            itemSize = item.get("length/mm"), item.get("width/mm"), item.get("height/mm")
-            itemCP = info["corner_points"].get(itemArticle, {})
+            if item is None:
+                # placeholder at the end of an item sequence
+                continue
+            itemSize = item.length_mm, item.width_mm, item.height_mm
+            itemCP = info["corner_points"].get(item.article, {})
 
             for itemOrientation, listPossibleCPs in itemCP.items():
                 if len(listPossibleCPs):
@@ -389,16 +392,14 @@ class O3DBP_3_2:
                 collectionActionAndScore.sort(key=lambda el: np.sum(el["scores"]), reverse=True)
                 collectionActionAndScore = collectionActionAndScore[:N_LIMIT_COMBINATIONS]
                 actionsForEstimation = [collEntry["actions"] for collEntry in collectionActionAndScore]
-                templateSimEnv = copy.deepcopy(self.__SimEnvironment)
-                templateSimEnv.remStoredOrder()
+                templateSimEnv = self.__SimEnvironment.copy_without_orders()
                 mpEnvs = [copy.deepcopy(templateSimEnv) for _ in actionsForEstimation]
                 actionsForEstimation = [(env, action) for env, action in zip(mpEnvs, actionsForEstimation)]
 
             else:
                 # we need all actions that should be estimated
                 actionsForEstimation = [collEntry["actions"] for collEntry in collectionActionAndScore]
-                templateSimEnv = copy.deepcopy(self.__SimEnvironment)
-                templateSimEnv.remStoredOrder()
+                templateSimEnv = self.__SimEnvironment.copy_without_orders()
                 mpEnvs = [copy.deepcopy(templateSimEnv) for _ in actionsForEstimation]
                 actionsForEstimation = [(env, action) for env, action in zip(mpEnvs, actionsForEstimation)]
 
@@ -486,8 +487,8 @@ class O3DBP_3_2:
             returnInformation["scores"] = []
 
         else:
-            nextItem = nextInfo["next_items_selection"][0]
-            nextItemSize = [nextItem["length/mm"], nextItem["width/mm"], nextItem["height/mm"]]
+            nextItem: Item = nextInfo["next_items_selection"][0]
+            nextItemSize = [nextItem.length_mm, nextItem.width_mm, nextItem.height_mm]
 
             # Calculate the scores of the corner points
             possibleCP = self.__checkWhetherCornerPointsHaveToMoveOutwards(
@@ -510,7 +511,7 @@ class O3DBP_3_2:
 
         return returnInformation
 
-    def __convertCornerPointToAction(self, cornerpoint: list, item: dict, itemorientation: int) -> dict:
+    def __convertCornerPointToAction(self, cornerpoint: list, item: Item, itemorientation: int) -> dict:
         """
         Converts a corner point to an action for the palletizing environment.
 
@@ -518,8 +519,8 @@ class O3DBP_3_2:
         -----------
         cornerpoint: list
             The coordinates of the corner point.
-        item: dict
-            The item dictionary.
+        item: Item
+            The item that is placed.
         itemorientation: int
             The orientation of the item.
 
