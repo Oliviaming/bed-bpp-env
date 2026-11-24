@@ -1,0 +1,77 @@
+{
+ "algorithm": "o3dbp_constrained",
+ "label": "O3DBP-3-2 + support filter + 2 m cap",
+ "params": {
+  "move_corner_points_outwards": false,
+  "origin_fallback": false,
+  "min_support": 0.75,
+  "max_base_height_mm": 2000
+ },
+ "dataset": "sample5",
+ "score": 0.31,
+ "stable_orders": 5,
+ "orders": 5,
+ "placed_ratio": 0.31,
+ "per_order": [
+  {
+   "order": "00100408",
+   "target": "euro-pallet",
+   "items": 26,
+   "placed": 14,
+   "stable": 1,
+   "counted": 14,
+   "solve_s": 33.5,
+   "max_top_mm": 1520,
+   "volume_utilization": 0.4531,
+   "mean_support": 0.9734
+  },
+  {
+   "order": "00100001",
+   "target": "rollcontainer",
+   "items": 44,
+   "placed": 17,
+   "stable": 1,
+   "counted": 17,
+   "solve_s": 17.4,
+   "max_top_mm": 1650,
+   "volume_utilization": 0.3238,
+   "mean_support": 0.9533
+  },
+  {
+   "order": "00100002",
+   "target": "rollcontainer",
+   "items": 38,
+   "placed": 7,
+   "stable": 1,
+   "counted": 7,
+   "solve_s": 7.5,
+   "max_top_mm": 1080,
+   "volume_utilization": 0.2354,
+   "mean_support": 0.9893
+  },
+  {
+   "order": "00100003",
+   "target": "rollcontainer",
+   "items": 34,
+   "placed": 10,
+   "stable": 1,
+   "counted": 10,
+   "solve_s": 6.3,
+   "max_top_mm": 1670,
+   "volume_utilization": 0.2941,
+   "mean_support": 0.9975
+  },
+  {
+   "order": "00100004",
+   "target": "euro-pallet",
+   "items": 58,
+   "placed": 14,
+   "stable": 1,
+   "counted": 14,
+   "solve_s": 37.1,
+   "max_top_mm": 1040,
+   "volume_utilization": 0.2889,
+   "mean_support": 0.9678
+  }
+ ]
+}

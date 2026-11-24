@@ -1,0 +1,83 @@
+{
+ "algorithm": "stable_heightmap_load_check",
+ "label": "StableHeightmap + load check",
+ "params": {
+  "min_support": 0.3,
+  "lookahead_top_n": 8,
+  "w_area": 1.0,
+  "load_check": true,
+  "stability_margin_mm": 20,
+  "stability_margin_per_m": 0,
+  "load_check_max_candidates": 64,
+  "w_rise": 1.0,
+  "w_contact": 0.2,
+  "w_flush": 0.2
+ },
+ "dataset": "sample5",
+ "score": 0.875,
+ "stable_orders": 5,
+ "orders": 5,
+ "placed_ratio": 0.875,
+ "per_order": [
+  {
+   "order": "00100408",
+   "target": "euro-pallet",
+   "items": 26,
+   "placed": 26,
+   "stable": 1,
+   "counted": 26,
+   "solve_s": 5.1,
+   "max_top_mm": 2120,
+   "volume_utilization": 0.6098,
+   "mean_support": 0.9179
+  },
+  {
+   "order": "00100001",
+   "target": "rollcontainer",
+   "items": 44,
+   "placed": 31,
+   "stable": 1,
+   "counted": 31,
+   "solve_s": 3.9,
+   "max_top_mm": 2120,
+   "volume_utilization": 0.5216,
+   "mean_support": 0.9437
+  },
+  {
+   "order": "00100002",
+   "target": "rollcontainer",
+   "items": 38,
+   "placed": 32,
+   "stable": 1,
+   "counted": 32,
+   "solve_s": 3.2,
+   "max_top_mm": 2230,
+   "volume_utilization": 0.5875,
+   "mean_support": 0.9097
+  },
+  {
+   "order": "00100003",
+   "target": "rollcontainer",
+   "items": 34,
+   "placed": 28,
+   "stable": 1,
+   "counted": 28,
+   "solve_s": 3.1,
+   "max_top_mm": 2200,
+   "volume_utilization": 0.646,
+   "mean_support": 0.9443
+  },
+  {
+   "order": "00100004",
+   "target": "euro-pallet",
+   "items": 58,
+   "placed": 58,
+   "stable": 1,
+   "counted": 58,
+   "solve_s": 14.5,
+   "max_top_mm": 2140,
+   "volume_utilization": 0.574,
+   "mean_support": 0.9229
+  }
+ ]
+}

@@ -1,0 +1,209 @@
+[
+ {
+  "round": 1,
+  "run": "ms05_m20",
+  "change": "load check, min_support 0.5, margin 20 mm",
+  "dev20 score": 0.6566,
+  "dev20 stable": "18/20",
+  "val20 score": null,
+  "val20 stable": null
+ },
+ {
+  "round": 1,
+  "run": "ms04_m20",
+  "change": "min_support 0.4",
+  "dev20 score": 0.6226,
+  "dev20 stable": "17/20",
+  "val20 score": null,
+  "val20 stable": null
+ },
+ {
+  "round": 1,
+  "run": "ms03_m20",
+  "change": "min_support 0.3 (= preset stable_heightmap_load_check)",
+  "dev20 score": 0.6493,
+  "dev20 stable": "17/20",
+  "val20 score": 0.6703,
+  "val20 stable": "16/20"
+ },
+ {
+  "round": 1,
+  "run": "ms03_m30",
+  "change": "min_support 0.3, margin 30 mm",
+  "dev20 score": 0.6917,
+  "dev20 stable": "18/20",
+  "val20 score": null,
+  "val20 stable": null
+ },
+ {
+  "round": 1,
+  "run": "ms03_m40",
+  "change": "margin 40 mm",
+  "dev20 score": 0.6541,
+  "dev20 stable": "18/20",
+  "val20 score": null,
+  "val20 stable": null
+ },
+ {
+  "round": 1,
+  "run": "m30_mpm30",
+  "change": "margin 30 mm + 30 mm per m height",
+  "dev20 score": 0.6784,
+  "dev20 stable": "19/20",
+  "val20 score": null,
+  "val20 stable": null
+ },
+ {
+  "round": 1,
+  "run": "m30_mpm60",
+  "change": "margin 30 mm + 60 mm per m height",
+  "dev20 score": 0.5498,
+  "dev20 stable": "20/20",
+  "val20 score": null,
+  "val20 stable": null
+ },
+ {
+  "round": 1,
+  "run": "m30_c05",
+  "change": "margin 30 mm, w_contact 0.5",
+  "dev20 score": 0.7148,
+  "dev20 stable": "19/20",
+  "val20 score": null,
+  "val20 stable": null
+ },
+ {
+  "round": 1,
+  "run": "m30_mpm40_c05",
+  "change": "w_contact 0.5 + 40 mm per m height",
+  "dev20 score": 0.6772,
+  "dev20 stable": "20/20",
+  "val20 score": null,
+  "val20 stable": null
+ },
+ {
+  "round": 1,
+  "run": "T1",
+  "change": "w_contact 0.5, w_flush 0.2, w_rise 0.5",
+  "dev20 score": 0.6881,
+  "dev20 stable": "17/20",
+  "val20 score": null,
+  "val20 stable": null
+ },
+ {
+  "round": 1,
+  "run": "T2",
+  "change": "w_contact 1.0, w_flush 0.2, w_rise 0.5 (best on dev20)",
+  "dev20 score": 0.8192,
+  "dev20 stable": "20/20",
+  "val20 score": 0.5451,
+  "val20 stable": "15/20"
+ },
+ {
+  "round": 1,
+  "run": "T3",
+  "change": "w_contact 1.0, w_flush 0.5, w_rise 0.5",
+  "dev20 score": 0.7718,
+  "dev20 stable": "19/20",
+  "val20 score": null,
+  "val20 stable": null
+ },
+ {
+  "round": 1,
+  "run": "T4",
+  "change": "T3 + 20 mm per m height",
+  "dev20 score": 0.6675,
+  "dev20 stable": "18/20",
+  "val20 score": null,
+  "val20 stable": null
+ },
+ {
+  "round": 1,
+  "run": "T5",
+  "change": "T1 + 20 mm per m height",
+  "dev20 score": 0.6505,
+  "dev20 stable": "18/20",
+  "val20 score": null,
+  "val20 stable": null
+ },
+ {
+  "round": 2,
+  "run": "basic",
+  "change": "no load check, min_support 0.6 (preset stable_heightmap_basic)",
+  "dev20 score": 0.716,
+  "dev20 stable": "20/20",
+  "val20 score": 0.6143,
+  "val20 stable": "16/20"
+ },
+ {
+  "round": 2,
+  "run": "K3",
+  "change": "T2 + hard column limit 3",
+  "dev20 score": 0.4175,
+  "dev20 stable": "20/20",
+  "val20 score": 0.3242,
+  "val20 stable": "19/20"
+ },
+ {
+  "round": 2,
+  "run": "K3.5",
+  "change": "T2 + hard column limit 3.5",
+  "dev20 score": 0.4757,
+  "dev20 stable": "20/20",
+  "val20 score": 0.3571,
+  "val20 stable": "19/20"
+ },
+ {
+  "round": 2,
+  "run": "K4",
+  "change": "T2 + hard column limit 4",
+  "dev20 score": 0.5146,
+  "dev20 stable": "20/20",
+  "val20 score": 0.3857,
+  "val20 stable": "19/20"
+ },
+ {
+  "round": 2,
+  "run": "P0",
+  "change": "T2 + progressive search (selected: best mean of dev20 and val20)",
+  "dev20 score": 0.8192,
+  "dev20 stable": "20/20",
+  "val20 score": 0.5637,
+  "val20 stable": "15/20"
+ },
+ {
+  "round": 2,
+  "run": "P4",
+  "change": "P0 + hard column limit 4",
+  "dev20 score": 0.5218,
+  "dev20 stable": "20/20",
+  "val20 score": 0.3857,
+  "val20 stable": "19/20"
+ },
+ {
+  "round": 2,
+  "run": "P5",
+  "change": "P0 + hard column limit 5",
+  "dev20 score": 0.574,
+  "dev20 stable": "20/20",
+  "val20 score": 0.4385,
+  "val20 stable": "18/20"
+ },
+ {
+  "round": 2,
+  "run": "W1",
+  "change": "P0 + soft column penalty 0.1",
+  "dev20 score": 0.7451,
+  "dev20 stable": "19/20",
+  "val20 score": 0.5747,
+  "val20 stable": "16/20"
+ },
+ {
+  "round": 2,
+  "run": "W3",
+  "change": "P0 + soft column penalty 0.3",
+  "dev20 score": 0.7743,
+  "dev20 stable": "19/20",
+  "val20 score": 0.5923,
+  "val20 stable": "16/20"
+ }
+]
