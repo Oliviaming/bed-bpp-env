@@ -3,6 +3,8 @@
 # # # # # # # # # # # # #
 __pycache__/
 output/
+# local copy of the BED-BPP dataset (78 MB, distributed by the author)
+data/
 .ipynb_checkpoints/
 # .vscode/
 .gradle/
