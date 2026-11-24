@@ -26,6 +26,27 @@ parser.add_argument(
     default=utils.getPathToExampleData().joinpath("5_bed-bpp.json"),
     help="Defines which data is used.",
 )
+parser.add_argument(
+    "--no_move_outwards",
+    action="store_true",
+    default=False,
+    help="Do not shift corner points towards the outside of the target (the shift causes unsupported placements).",
+)
+parser.add_argument(
+    "--no_origin_fallback",
+    action="store_true",
+    default=False,
+    help="Do not place items at the origin when the selected corner point is higher than the origin.",
+)
+parser.add_argument(
+    "--min_support", type=float, default=0.0, help="Minimum estimated support ratio of a placement, in [0, 1]."
+)
+parser.add_argument(
+    "--max_base_height",
+    type=int,
+    default=None,
+    help="Maximum height (mm) of the bottom of a placed item; the order is stopped if no placement is feasible.",
+)
 utils.arguments_parser.parse()
 
 
@@ -48,7 +69,14 @@ if __name__ == "__main__":
 
     # init heuristic
     _, nPreview, nSelection = utils.PARSEDARGUMENTS.get("task").split("-")
-    heuristic = O3DBP_3_2(preview=int(nPreview), selection=int(nSelection))
+    heuristic = O3DBP_3_2(
+        preview=int(nPreview),
+        selection=int(nSelection),
+        move_corner_points_outwards=not utils.PARSEDARGUMENTS["no_move_outwards"],
+        origin_fallback=not utils.PARSEDARGUMENTS["no_origin_fallback"],
+        min_support=utils.PARSEDARGUMENTS["min_support"],
+        max_base_height_mm=utils.PARSEDARGUMENTS["max_base_height"],
+    )
 
     order_sequence = load_order_sequence(utils.PARSEDARGUMENTS["data"])
 

@@ -7,7 +7,7 @@ import gc
 import logging
 import multiprocessing
 import time
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -48,7 +48,26 @@ class O3DBP_3_2:
         A deepcopy of the palletizing environment for which an action is determined. This deepcopy is needed for estimating the scores of the possible actions.
     """
 
-    def __init__(self, preview: int = 3, selection: int = 2) -> None:
+    def __init__(
+        self,
+        preview: int = 3,
+        selection: int = 2,
+        move_corner_points_outwards: bool = True,
+        origin_fallback: bool = True,
+        min_support: float = 0.0,
+        max_base_height_mm: Optional[int] = None,
+    ) -> None:
+        """
+        The defaults reproduce the original heuristic. The other parameters address its main failure modes:
+
+        - `move_corner_points_outwards`: shift corner points so that items end at 90 % of the target size. The shift
+          ignores what is below the item and causes placements with almost no support.
+        - `origin_fallback`: place the item at the origin whenever the selected corner point is more than 20 mm higher
+          than the origin. This builds a column at the origin.
+        - `min_support`: minimum estimated support ratio (in `[0, 1]`) of a placement.
+        - `max_base_height_mm`: maximum height of the bottom of a placed item. Items above the evaluation height
+          (2 m) never count, but can destabilize the pile. If no placement is feasible, the heuristic stops the order.
+        """
         self.__SimEnvironment = None
         """A deepcopy of the palletizing environment for which an action is determined. This deepcopy is needed for estimating the scores of the possible actions."""
 
@@ -57,6 +76,19 @@ class O3DBP_3_2:
         self.__NSelection = selection
         """The amount of items that are selectable for the next palletizing step."""
         logger.info(f"heuristic set for selection={self.__NSelection} and preview={self.__NPreview}")
+
+        self.__MoveCornerPointsOutwards = move_corner_points_outwards
+        """Indicates whether corner points are moved towards the outside of the target."""
+        self.__OriginFallback = origin_fallback
+        """Indicates whether the origin is used if the selected corner point is too high."""
+        self.__MinSupport = min_support
+        """The minimum estimated support ratio of a placement."""
+        self.__MaxBaseHeight = max_base_height_mm
+        """The maximum height of the bottom of an item in millimeters (`None`: no limit)."""
+        logger.info(
+            f"move_corner_points_outwards={move_corner_points_outwards}, origin_fallback={origin_fallback}, "
+            f"min_support={min_support}, max_base_height_mm={max_base_height_mm}"
+        )
 
         self.__SCORE_WEIGHTS = [1.3, -2.0, -1.00001, -1.2]
         """The weights that are used to determine the score of an action."""
@@ -105,11 +137,15 @@ class O3DBP_3_2:
         """
         possibleCP = self.__extractCornerPointsFromEnvironmentInfo(info.get("corner_points"))
 
+        firstCornerPointAction = None
         if len(possibleCP):
+            # `None` if no corner point satisfies the placement constraints
             firstCornerPointAction = self.__estimateCurrentCPScoreWithUpcomingItems(info, observation)
+
+        if firstCornerPointAction is not None:
             successful = True
             # check whether corner point in origin should be taken
-            if not (firstCornerPointAction["x"] == 0 and firstCornerPointAction["y"]):
+            if self.__OriginFallback and not (firstCornerPointAction["x"] == 0 and firstCornerPointAction["y"]):
                 tempCornerPoint = (
                     firstCornerPointAction["x"],
                     firstCornerPointAction["y"],
@@ -176,6 +212,25 @@ class O3DBP_3_2:
             normedDistOrig3D,
         ]
         return values
+
+    def __isFeasiblePlacement(self, observation: np.ndarray, cornerpoint: list, itemsize: list) -> bool:
+        """Checks the constraints `min_support` and `max_base_height_mm` for an item placed in the corner point."""
+        if self.__MinSupport > 0 and self.__estimateSupportArea(observation, cornerpoint, itemsize) < self.__MinSupport:
+            return False
+
+        if self.__MaxBaseHeight is not None:
+            estimatedBase = self.__estimatePlacementZCoordinate(observation, cornerpoint, itemsize) - itemsize[-1]
+            if estimatedBase > self.__MaxBaseHeight:
+                return False
+
+        return True
+
+    def __prepareCornerPoints(self, cornerpoints: list, itemsize: list, observation: np.ndarray) -> list:
+        """Optionally moves the corner points outwards and removes corner points that violate the constraints."""
+        if self.__MoveCornerPointsOutwards:
+            cornerpoints = self.__checkWhetherCornerPointsHaveToMoveOutwards(cornerpoints, itemsize, observation.shape)
+
+        return [cp for cp in cornerpoints if self.__isFeasiblePlacement(observation, cp, itemsize)]
 
     def multiplyWeightScore(self, values: list, weights: list) -> float:
         """
@@ -371,9 +426,9 @@ class O3DBP_3_2:
             for itemOrientation, listPossibleCPs in itemCP.items():
                 if len(listPossibleCPs):
                     possibleCP = [list(cp) + [itemOrientation] for cp in listPossibleCPs]
-                    possibleCP = self.__checkWhetherCornerPointsHaveToMoveOutwards(
-                        possibleCP, itemSize, observation.shape
-                    )
+                    possibleCP = self.__prepareCornerPoints(possibleCP, itemSize, observation)
+                    if not possibleCP:
+                        continue
                     weightScoresCornerPoints = [
                         self.__getScoreWeightsOfCornerPoint(observation, cp, itemSize) for cp in possibleCP
                     ]
@@ -385,6 +440,10 @@ class O3DBP_3_2:
                         }
                         for cp, cpScore in zip(possibleCP, list(scoresCornerPoints))
                     ]
+
+        if not collectionActionAndScore:
+            # no corner point satisfies the placement constraints
+            return None
 
         # HERE STARTS THE SCORE ESTIMATION
         for nPreviewStep in range(self.__NPreview - 1):
@@ -481,19 +540,18 @@ class O3DBP_3_2:
                 break
 
         possibleCP = self.__extractCornerPointsFromEnvironmentInfo(nextInfo.get("corner_points", {}))
+        if possibleCP:
+            nextItem: Item = nextInfo["next_items_selection"][0]
+            nextItemSize = [nextItem.length_mm, nextItem.width_mm, nextItem.height_mm]
+            possibleCP = self.__prepareCornerPoints(possibleCP, nextItemSize, newObservation)
+
         if possibleCP == []:
             returnInformation["resulting_actions"] = []
             returnInformation["resulting_corner_points"] = []
             returnInformation["scores"] = []
 
         else:
-            nextItem: Item = nextInfo["next_items_selection"][0]
-            nextItemSize = [nextItem.length_mm, nextItem.width_mm, nextItem.height_mm]
-
             # Calculate the scores of the corner points
-            possibleCP = self.__checkWhetherCornerPointsHaveToMoveOutwards(
-                possibleCP, nextItemSize, newObservation.shape
-            )
             weightScoresCornerPoints = [
                 self.__getScoreWeightsOfCornerPoint(newObservation, cp, nextItemSize) for cp in possibleCP
             ]
